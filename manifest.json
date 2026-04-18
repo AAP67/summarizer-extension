@@ -1,11 +1,10 @@
-cat > manifest.json << 'EOF'
 {
   "manifest_version": 3,
   "name": "Universal Summarizer",
   "version": "0.3.0",
   "description": "One-click structured summaries for any webpage. 300-400 words, every time.",
   "permissions": ["activeTab", "storage", "scripting", "sidePanel"],
-  "host_permissions": ["https://api.anthropic.com/*"],
+  "host_permissions": ["https://api.anthropic.com/*", "<all_urls>"],
   "background": {
     "service_worker": "background.js"
   },
@@ -25,4 +24,3 @@ cat > manifest.json << 'EOF'
     "128": "icons/icon-128.png"
   }
 }
-EOF
