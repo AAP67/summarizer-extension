@@ -1,140 +1,121 @@
-// ============================================
-// Universal Summarizer — Popup Controller
-// ============================================
+function $(id) { return document.getElementById(id); }
 
-const $ = (sel) => document.querySelector(sel);
-
-const views = {
-  setup: $('#setup'),
-  loading: $('#loading'),
-  result: $('#result'),
-  error: $('#error')
-};
-
-function showView(name) {
-  Object.values(views).forEach(v => v.style.display = 'none');
-  views[name].style.display = 'block';
+function showView(id) {
+  var views = ['setup', 'loading', 'summary', 'error'];
+  for (var i = 0; i < views.length; i++) {
+    $(views[i]).style.display = (views[i] === id) ? 'block' : 'none';
+  }
 }
 
-// Parse markdown summary into structured sections
-function parseSummary(markdown) {
-  const lines = markdown.split('\n');
-  let contentType = 'general';
-  const sections = [];
-  let currentSection = null;
+function escapeHtml(str) {
+  var div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
 
-  for (const line of lines) {
-    // Extract content type badge: **[Type]**
-    const typeMatch = line.match(/^\*\*\[?([^\]*]+)\]?\*\*$/);
-    if (typeMatch) {
-      contentType = typeMatch[1].trim();
-      continue;
+function runSummarize() {
+  showView('loading');
+  chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
+    if (!tabs || !tabs[0]) {
+      showError('No active tab found.');
+      return;
     }
-
-    // Section header: ## Title
-    const headerMatch = line.match(/^##\s+(.+)$/);
-    if (headerMatch) {
-      if (currentSection) sections.push(currentSection);
-      currentSection = { title: headerMatch[1].trim(), body: '' };
-      continue;
-    }
-
-    // Body text
-    if (currentSection && line.trim()) {
-      currentSection.body += (currentSection.body ? ' ' : '') + line.trim();
-    }
-  }
-  if (currentSection) sections.push(currentSection);
-
-  return { contentType, sections };
+    chrome.runtime.sendMessage(
+      { action: 'summarize', tabId: tabs[0].id },
+      function(response) {
+        if (chrome.runtime.lastError) {
+          showError(chrome.runtime.lastError.message);
+          return;
+        }
+        if (!response) {
+          showError('No response from background. Try again.');
+          return;
+        }
+        if (response.success) {
+          renderSummary(response.data);
+        } else {
+          showError(response.error);
+        }
+      }
+    );
+  });
 }
 
 function renderSummary(data) {
-  const { contentType, sections } = parseSummary(data.summary);
+  var summary = data.summary;
 
-  $('#pageTitle').textContent = data.title;
+  var badge = $('typeBadge');
+  badge.textContent = summary.content_type;
+  badge.style.display = 'inline';
 
-  let html = '<span class="content-type">' + contentType + '</span>';
-  for (const sec of sections) {
-    html += '<div class="section">';
-    html += '<h2>' + sec.title + '</h2>';
-    html += '<p>' + sec.body + '</p>';
-    html += '</div>';
-  }
-  $('#summaryContent').innerHTML = html;
+  $('pageTitle').textContent = data.title || data.url;
 
-  const tokens = data.usage ? (data.usage.input_tokens + data.usage.output_tokens) : '?';
-  $('#metaInfo').textContent = tokens + ' tokens';
+  var container = $('sections');
+  container.innerHTML = '';
 
-  showView('result');
-}
-
-async function runSummarize() {
-  showView('loading');
-
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab) {
-    showError('No active tab found.');
-    return;
+  for (var i = 0; i < summary.sections.length; i++) {
+    var section = summary.sections[i];
+    var div = document.createElement('div');
+    div.className = 'section';
+    div.innerHTML = '<h3>' + escapeHtml(section.header) + '</h3><p>' + escapeHtml(section.body) + '</p>';
+    container.appendChild(div);
   }
 
-  chrome.runtime.sendMessage(
-    { action: 'summarize', tabId: tab.id },
-    (response) => {
-      if (!response) {
-        showError('No response from background worker.');
-        return;
-      }
-      if (response.error === 'NO_API_KEY') {
-        showView('setup');
-        return;
-      }
-      if (response.error) {
-        showError(response.message || response.error);
-        return;
-      }
-      renderSummary(response);
-    }
-  );
+  showView('summary');
 }
 
 function showError(msg) {
-  $('#errorMsg').textContent = msg;
+  var friendly = msg || 'Unknown error';
+  if (friendly.indexOf('NO_API_KEY') >= 0) {
+    showView('setup');
+    return;
+  }
+  if (friendly.indexOf('NO_CONTENT') >= 0) {
+    friendly = 'Not enough readable content on this page.';
+  }
+  if (friendly.indexOf('API_ERROR: 401') >= 0) {
+    friendly = 'Invalid API key. Check and re-enter.';
+  }
+  if (friendly.indexOf('API_ERROR: 429') >= 0) {
+    friendly = 'Rate limited. Wait a moment and retry.';
+  }
+  $('errorMsg').textContent = friendly;
   showView('error');
 }
 
-// --- Event Listeners ---
+function copySummary() {
+  var sections = document.querySelectorAll('.section');
+  var text = '';
+  for (var i = 0; i < sections.length; i++) {
+    var header = sections[i].querySelector('h3').textContent;
+    var body = sections[i].querySelector('p').textContent;
+    text += '## ' + header + '\n' + body + '\n\n';
+  }
+  navigator.clipboard.writeText(text.trim()).then(function() {
+    var btn = $('copyBtn');
+    btn.textContent = 'Copied!';
+    setTimeout(function() { btn.textContent = 'Copy Summary'; }, 1500);
+  });
+}
 
-$('#saveKeyBtn').addEventListener('click', () => {
-  const key = $('#apiKeyInput').value.trim();
+$('saveKeyBtn').addEventListener('click', function() {
+  var key = $('apiKeyInput').value.trim();
   if (!key) return;
-  chrome.runtime.sendMessage({ action: 'saveApiKey', apiKey: key }, () => {
+  chrome.runtime.sendMessage({ action: 'setApiKey', key: key }, function() {
     runSummarize();
   });
 });
 
-$('#retryBtn').addEventListener('click', () => runSummarize());
+$('copyBtn').addEventListener('click', copySummary);
+$('resummarizeBtn').addEventListener('click', runSummarize);
+$('retryBtn').addEventListener('click', runSummarize);
 
-$('#copyBtn').addEventListener('click', () => {
-  const text = $('#summaryContent').innerText;
-  navigator.clipboard.writeText(text).then(() => {
-    $('#copyBtn').textContent = '✓ Copied';
-    setTimeout(() => { $('#copyBtn').textContent = '📋 Copy'; }, 1500);
-  });
-});
-
-$('#settingsBtn').addEventListener('click', () => {
-  showView('setup');
-  chrome.storage.local.get('apiKey', (data) => {
-    if (data.apiKey) {
-      $('#apiKeyInput').value = data.apiKey;
-    }
-  });
-});
-
-// --- Init ---
-chrome.runtime.sendMessage({ action: 'checkApiKey' }, (response) => {
-  if (response && response.hasKey) {
+chrome.runtime.sendMessage({ action: 'checkApiKey' }, function(response) {
+  if (chrome.runtime.lastError || !response) {
+    showView('setup');
+    return;
+  }
+  if (response.hasKey) {
     runSummarize();
   } else {
     showView('setup');
