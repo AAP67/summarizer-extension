@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      font-size: 14px;
+      color: #1a1a1a;
+      background: #fafafa;
+      min-height: 100vh;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 16px;
+      background: #fff;
+      border-bottom: 1px solid #e5e5e5;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .topbar h1 { font-size: 16px; font-weight: 700; }
+    .badge {
+      font-size: 10px;
+      padding: 3px 10px;
+      border-radius: 99px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .badge-news { background: #dbeafe; color: #1d4ed8; }
+    .badge-product { background: #dcfce7; color: #15803d; }
+    .badge-research { background: #ffedd5; color: #c2410c; }
+    .badge-blog { background: #f3e8ff; color: #7c3aed; }
+    .badge-documentation { background: #f1f5f9; color: #475569; }
+    .badge-general { background: #f1f5f9; color: #475569; }
+
+    #setup { padding: 32px 20px; text-align: center; }
+    #setup p { color: #666; margin-bottom: 16px; font-size: 13px; line-height: 1.6; }
+    #setup input {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      font-size: 13px;
+      margin-bottom: 10px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    #setup input:focus { border-color: #7c5cfc; box-shadow: 0 0 0 3px rgba(124,92,252,0.1); }
+
+    .btn {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn:hover { transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
+    .btn-primary { background: #7c5cfc; color: #fff; box-shadow: 0 2px 8px rgba(124,92,252,0.3); }
+    .btn-ghost { background: none; color: #7c5cfc; margin-top: 4px; box-shadow: none; }
+
+    #loading { display: none; padding: 20px; }
+    .skeleton-section {
+      background: #fff;
+      border-radius: 10px;
+      padding: 16px;
+      margin-bottom: 10px;
+      border: 1px solid #f0f0f0;
+    }
+    .skeleton-header {
+      height: 10px;
+      width: 30%;
+      background: linear-gradient(90deg, #e5e5e5 25%, #f0f0f0 50%, #e5e5e5 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: 4px;
+      margin-bottom: 12px;
+    }
+    .skeleton-line {
+      height: 10px;
+      background: linear-gradient(90deg, #e5e5e5 25%, #f0f0f0 50%, #e5e5e5 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: 4px;
+      margin-bottom: 8px;
+    }
+    .skeleton-line:last-child { width: 70%; }
+    @keyframes shimmer { to { background-position: -200% 0; } }
+
+    #summary { display: none; padding: 16px 20px; }
+    .page-title {
+      font-size: 11px;
+      color: #999;
+      margin-bottom: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .section {
+      background: #fff;
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 10px;
+      border: 1px solid #f0f0f0;
+      cursor: pointer;
+      transition: all 0.2s;
+      animation: fadeIn 0.3s ease;
+    }
+    .section:hover { border-color: #ddd; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+    .section h3 {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #7c5cfc;
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .copy-hint {
+      font-size: 10px;
+      color: #ccc;
+      text-transform: none;
+      letter-spacing: 0;
+      font-weight: 400;
+      transition: color 0.2s;
+    }
+    .section:hover .copy-hint { color: #999; }
+    .section p { font-size: 13px; line-height: 1.7; color: #444; }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+      padding: 16px 20px;
+      position: sticky;
+      bottom: 0;
+      background: #fafafa;
+    }
+    .actions .btn { font-size: 13px; padding: 10px; }
+
+    #error { display: none; padding: 32px 20px; text-align: center; }
+    #error p { color: #d44; font-size: 13px; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>&#9889; Summarizer</h1>
+    <span class="badge" id="typeBadge" style="display:none;"></span>
+  </div>
+
+  <div id="setup">
+    <p>Enter your Anthropic API key to get started.<br>Stored locally only.</p>
+    <input type="password" id="apiKeyInput" placeholder="sk-ant-..." />
+    <button class="btn btn-primary" id="saveKeyBtn">Save &amp; Summarize</button>
+  </div>
+
+  <div id="loading">
+    <div class="skeleton-section"><div class="skeleton-header"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>
+    <div class="skeleton-section"><div class="skeleton-header"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>
+    <div class="skeleton-section"><div class="skeleton-header"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>
+    <div class="skeleton-section"><div class="skeleton-header"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>
+    <div class="skeleton-section"><div class="skeleton-header"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>
+  </div>
+
+  <div id="summary">
+    <div class="page-title" id="pageTitle"></div>
+    <div id="sections"></div>
+    <div class="actions">
+      <button class="btn btn-primary" id="copyBtn">Copy All</button>
+      <button class="btn btn-ghost" id="resummarizeBtn">Re-summarize</button>
+    </div>
+  </div>
+
+  <div id="error">
+    <p id="errorMsg"></p>
+    <button class="btn btn-primary" id="retryBtn" style="margin-top:14px;">Retry</button>
+  </div>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>

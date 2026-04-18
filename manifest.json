@@ -1,15 +1,18 @@
+cat > manifest.json << 'EOF'
 {
   "manifest_version": 3,
   "name": "Universal Summarizer",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "One-click structured summaries for any webpage. 300-400 words, every time.",
-  "permissions": ["activeTab", "storage", "scripting"],
+  "permissions": ["activeTab", "storage", "scripting", "sidePanel"],
   "host_permissions": ["https://api.anthropic.com/*"],
   "background": {
     "service_worker": "background.js"
   },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
   "action": {
-    "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon-16.png",
       "48": "icons/icon-48.png",
@@ -22,3 +25,4 @@
     "128": "icons/icon-128.png"
   }
 }
+EOF

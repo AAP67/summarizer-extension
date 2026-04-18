@@ -1,3 +1,8 @@
+// Open side panel when extension icon is clicked
+chrome.action.onClicked.addListener(function(tab) {
+  chrome.sidePanel.open({ tabId: tab.id });
+});
+
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-haiku-4-5-20251001';
 
