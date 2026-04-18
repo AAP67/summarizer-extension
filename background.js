@@ -1,5 +1,5 @@
 const API_URL = 'https://api.anthropic.com/v1/messages';
-const MODEL = 'claude-haiku-4-5-20241022';
+const MODEL = 'claude-haiku-4-5-20251001';
 
 const SYSTEM_PROMPT = `You are a universal webpage summarizer. Given the text content of a webpage, produce a structured summary in exactly 5 sections totaling 300-400 words.
 
