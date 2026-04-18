@@ -1,14 +1,23 @@
 function $(id) { return document.getElementById(id); }
 
+var currentSummaryData = null;
+
 function showView(id) {
-  var views = ['setup', 'loading', 'summary', 'error'];
+  var views = ['setup', 'loading', 'summary', 'error', 'history'];
   for (var i = 0; i < views.length; i++) {
     $(views[i]).style.display = (views[i] === id) ? 'block' : 'none';
   }
-  // Hide thin warning and cache badge when switching views
   if (id !== 'summary') {
     $('thinWarning').style.display = 'none';
     $('cacheBadge').style.display = 'none';
+  }
+  // Update tab styling
+  if (id === 'history') {
+    $('tabSummary').className = 'tab';
+    $('tabHistory').className = 'tab active';
+  } else {
+    $('tabSummary').className = 'tab active';
+    $('tabHistory').className = 'tab';
   }
 }
 
@@ -18,8 +27,21 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+function timeAgo(timestamp) {
+  var seconds = Math.floor((Date.now() - timestamp) / 1000);
+  if (seconds < 60) return 'just now';
+  var minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return minutes + 'm ago';
+  var hours = Math.floor(minutes / 60);
+  if (hours < 24) return hours + 'h ago';
+  var days = Math.floor(hours / 24);
+  if (days < 7) return days + 'd ago';
+  return new Date(timestamp).toLocaleDateString();
+}
+
 function runSummarize(skipCache) {
   showView('loading');
+  $('tabBar').style.display = 'flex';
   chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
     if (!tabs || !tabs[0]) {
       showError('No active tab found.');
@@ -47,29 +69,19 @@ function runSummarize(skipCache) {
 }
 
 function renderSummary(data) {
+  currentSummaryData = data;
   var summary = data.summary;
 
-  // Content type badge
   var badge = $('typeBadge');
   badge.textContent = summary.content_type;
   badge.className = 'badge badge-' + summary.content_type;
   badge.style.display = 'inline';
 
-  // Cache badge
   var cacheBadge = $('cacheBadge');
-  if (data.fromCache) {
-    cacheBadge.style.display = 'inline';
-  } else {
-    cacheBadge.style.display = 'none';
-  }
+  cacheBadge.style.display = data.fromCache ? 'inline' : 'none';
 
-  // Thin content warning
   var thinWarning = $('thinWarning');
-  if (data.thin) {
-    thinWarning.style.display = 'block';
-  } else {
-    thinWarning.style.display = 'none';
-  }
+  thinWarning.style.display = data.thin ? 'block' : 'none';
 
   $('pageTitle').textContent = data.title || data.url;
 
@@ -103,7 +115,57 @@ function renderSummary(data) {
     container.appendChild(div);
   }
 
+  $('tabBar').style.display = 'flex';
   showView('summary');
+}
+
+function renderHistoryItem(item) {
+  var div = document.createElement('div');
+  div.className = 'history-item';
+  div.innerHTML = '<div class="history-item-title">' + escapeHtml(item.title) + '</div>' +
+    '<div class="history-item-meta">' +
+    '<span class="history-item-url">' + escapeHtml(item.url) + '</span>' +
+    '<span class="history-item-time">' + timeAgo(item.timestamp) + '</span>' +
+    '</div>';
+  div.addEventListener('click', function() {
+    renderSummary({
+      url: item.url,
+      title: item.title,
+      summary: item.summary,
+      thin: item.thin,
+      fromCache: true
+    });
+  });
+  return div;
+}
+
+function loadHistory(filter) {
+  chrome.runtime.sendMessage({ action: 'getHistory' }, function(response) {
+    if (chrome.runtime.lastError || !response || !response.success) return;
+
+    var list = $('historyList');
+    list.innerHTML = '';
+
+    var items = response.data;
+    if (filter) {
+      var lower = filter.toLowerCase();
+      items = items.filter(function(item) {
+        return item.title.toLowerCase().indexOf(lower) >= 0 ||
+               item.url.toLowerCase().indexOf(lower) >= 0;
+      });
+    }
+
+    if (items.length === 0) {
+      list.innerHTML = '<div class="history-empty">' +
+        (filter ? 'No matches found.' : 'No summaries yet. Summarize a page to get started.') +
+        '</div>';
+      return;
+    }
+
+    for (var i = 0; i < items.length; i++) {
+      list.appendChild(renderHistoryItem(items[i]));
+    }
+  });
 }
 
 function showError(msg) {
@@ -126,11 +188,11 @@ function showError(msg) {
 }
 
 function copyAll() {
-  var sections = document.querySelectorAll('.section');
+  var sections = document.querySelectorAll('#sections .section');
   var text = '';
   for (var i = 0; i < sections.length; i++) {
-    var header = sections[i].querySelector('h3').firstChild.textContent;
-    var body = sections[i].querySelector('p').textContent;
+    var header = sections[i].getAttribute('data-header');
+    var body = sections[i].getAttribute('data-body');
     text += '## ' + header + '\n' + body + '\n\n';
   }
   navigator.clipboard.writeText(text.trim()).then(function() {
@@ -140,7 +202,37 @@ function copyAll() {
   });
 }
 
-// Event listeners
+function exportMarkdown() {
+  if (!currentSummaryData) return;
+  var data = currentSummaryData;
+  var summary = data.summary;
+
+  var md = '# ' + data.title + '\n\n';
+  md += '> Source: ' + data.url + '\n';
+  md += '> Type: ' + summary.content_type + '\n';
+  md += '> Date: ' + new Date().toLocaleDateString() + '\n\n';
+  md += '---\n\n';
+
+  for (var i = 0; i < summary.sections.length; i++) {
+    md += '## ' + summary.sections[i].header + '\n\n';
+    md += summary.sections[i].body + '\n\n';
+  }
+
+  var blob = new Blob([md], { type: 'text/markdown' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  var filename = data.title.replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '-').substring(0, 50).toLowerCase();
+  a.download = filename + '-summary.md';
+  a.click();
+  URL.revokeObjectURL(url);
+
+  var btn = $('exportBtn');
+  btn.textContent = 'Exported!';
+  setTimeout(function() { btn.textContent = 'Export .md'; }, 1500);
+}
+
+// --- Event listeners ---
 $('saveKeyBtn').addEventListener('click', function() {
   var key = $('apiKeyInput').value.trim();
   if (!key) return;
@@ -150,10 +242,36 @@ $('saveKeyBtn').addEventListener('click', function() {
 });
 
 $('copyBtn').addEventListener('click', copyAll);
+$('exportBtn').addEventListener('click', exportMarkdown);
 $('resummarizeBtn').addEventListener('click', function() { runSummarize(true); });
 $('retryBtn').addEventListener('click', function() { runSummarize(false); });
 
-// Init
+$('tabSummary').addEventListener('click', function() {
+  if (currentSummaryData) {
+    showView('summary');
+  } else {
+    runSummarize(false);
+  }
+});
+
+$('tabHistory').addEventListener('click', function() {
+  loadHistory();
+  showView('history');
+});
+
+$('historySearch').addEventListener('input', function() {
+  loadHistory(this.value);
+});
+
+$('clearHistoryBtn').addEventListener('click', function() {
+  if (confirm('Clear all summary history?')) {
+    chrome.runtime.sendMessage({ action: 'clearHistory' }, function() {
+      loadHistory();
+    });
+  }
+});
+
+// --- Init ---
 chrome.runtime.sendMessage({ action: 'checkApiKey' }, function(response) {
   if (chrome.runtime.lastError || !response) {
     showView('setup');

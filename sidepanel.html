@@ -40,6 +40,26 @@
     .badge-general { background: #f1f5f9; color: #475569; }
     .badge-cached { background: #fef9c3; color: #a16207; }
 
+    /* Tabs */
+    .tabs {
+      display: flex;
+      background: #fff;
+      border-bottom: 1px solid #e5e5e5;
+    }
+    .tab {
+      flex: 1;
+      padding: 10px;
+      text-align: center;
+      font-size: 13px;
+      font-weight: 600;
+      color: #999;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+    }
+    .tab:hover { color: #666; }
+    .tab.active { color: #7c5cfc; border-bottom-color: #7c5cfc; }
+
     .thin-warning {
       display: none;
       padding: 10px 20px;
@@ -78,6 +98,7 @@
     .btn:active { transform: translateY(0); }
     .btn-primary { background: #7c5cfc; color: #fff; box-shadow: 0 2px 8px rgba(124,92,252,0.3); }
     .btn-ghost { background: none; color: #7c5cfc; margin-top: 4px; box-shadow: none; }
+    .btn-danger { background: none; color: #d44; margin-top: 4px; box-shadow: none; font-size: 12px; }
 
     #loading { display: none; padding: 20px; }
     .skeleton-section {
@@ -165,6 +186,67 @@
 
     #error { display: none; padding: 32px 20px; text-align: center; }
     #error p { color: #d44; font-size: 13px; line-height: 1.6; }
+
+    /* History */
+    #history { display: none; padding: 16px 20px; }
+    .history-search {
+      width: 100%;
+      padding: 10px 14px;
+      border: 1px solid #e5e5e5;
+      border-radius: 10px;
+      font-size: 13px;
+      margin-bottom: 12px;
+      outline: none;
+    }
+    .history-search:focus { border-color: #7c5cfc; }
+    .history-empty {
+      text-align: center;
+      color: #999;
+      font-size: 13px;
+      padding: 32px 0;
+    }
+    .history-item {
+      background: #fff;
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-bottom: 8px;
+      border: 1px solid #f0f0f0;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .history-item:hover { border-color: #ddd; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+    .history-item-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #1a1a1a;
+      margin-bottom: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .history-item-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .history-item-url {
+      font-size: 11px;
+      color: #999;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 70%;
+    }
+    .history-item-time {
+      font-size: 10px;
+      color: #bbb;
+    }
+    .history-actions {
+      padding: 12px 20px;
+      position: sticky;
+      bottom: 0;
+      background: #fafafa;
+    }
   </style>
 </head>
 <body>
@@ -176,8 +258,13 @@
     </div>
   </div>
 
+  <div class="tabs" id="tabBar" style="display:none;">
+    <div class="tab active" id="tabSummary">Summary</div>
+    <div class="tab" id="tabHistory">History</div>
+  </div>
+
   <div class="thin-warning" id="thinWarning">
-    &#9888; Limited content detected. This page may be paywalled or have minimal text. Summary may be incomplete.
+    &#9888; Limited content detected. This page may be paywalled or have minimal text.
   </div>
 
   <div id="setup">
@@ -199,7 +286,16 @@
     <div id="sections"></div>
     <div class="actions">
       <button class="btn btn-primary" id="copyBtn">Copy All</button>
+      <button class="btn btn-ghost" id="exportBtn">Export .md</button>
       <button class="btn btn-ghost" id="resummarizeBtn">Re-summarize</button>
+    </div>
+  </div>
+
+  <div id="history">
+    <input type="text" class="history-search" id="historySearch" placeholder="Search summaries..." />
+    <div id="historyList"></div>
+    <div class="history-actions">
+      <button class="btn btn-danger" id="clearHistoryBtn">Clear History</button>
     </div>
   </div>
 

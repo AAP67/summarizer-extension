@@ -23,11 +23,9 @@ async function getCached(url) {
   var result = await chrome.storage.local.get(key);
   if (result[key]) {
     var cached = result[key];
-    // Cache expires after 24 hours
     if (Date.now() - cached.timestamp < 24 * 60 * 60 * 1000) {
       return cached;
     }
-    // Expired — remove it
     await chrome.storage.local.remove(key);
   }
   return null;
@@ -49,6 +47,41 @@ async function setCache(url, data) {
 async function clearCache(url) {
   var key = getCacheKey(url);
   await chrome.storage.local.remove(key);
+}
+
+// --- History functions ---
+async function addToHistory(data) {
+  var result = await chrome.storage.local.get('history');
+  var history = result.history || [];
+
+  // Remove duplicate URL if exists
+  history = history.filter(function(item) { return item.url !== data.url; });
+
+  // Add to front
+  history.unshift({
+    url: data.url,
+    title: data.title,
+    summary: data.summary,
+    content_type: data.summary.content_type,
+    thin: data.thin || false,
+    timestamp: Date.now()
+  });
+
+  // Keep only last 50
+  if (history.length > 50) {
+    history = history.slice(0, 50);
+  }
+
+  await chrome.storage.local.set({ history: history });
+}
+
+async function getHistory() {
+  var result = await chrome.storage.local.get('history');
+  return result.history || [];
+}
+
+async function clearHistory() {
+  await chrome.storage.local.set({ history: [] });
 }
 
 // --- Content extraction ---
@@ -80,7 +113,6 @@ async function extractFromTab(tabId) {
 function truncateContent(content) {
   var words = content.split(/\s+/);
   if (words.length <= 6000) return content;
-  // Keep first 60% and last 20% to preserve intro and conclusion
   var headCount = Math.floor(6000 * 0.6);
   var tailCount = Math.floor(6000 * 0.2);
   var head = words.slice(0, headCount).join(' ');
@@ -133,7 +165,6 @@ async function handleSummarize(tabId, skipCache) {
   var wordCount = extraction.content.trim().split(/\s+/).length;
   var thin = wordCount < 200;
 
-  // Check cache unless skipCache is true
   if (!skipCache) {
     var cached = await getCached(extraction.url);
     if (cached) {
@@ -146,7 +177,6 @@ async function handleSummarize(tabId, skipCache) {
       };
     }
   } else {
-    // Clear existing cache for this URL
     await clearCache(extraction.url);
   }
 
@@ -160,8 +190,8 @@ async function handleSummarize(tabId, skipCache) {
     fromCache: false
   };
 
-  // Save to cache
   await setCache(extraction.url, result);
+  await addToHistory(result);
 
   return result;
 }
@@ -177,6 +207,20 @@ chrome.runtime.onMessage.addListener(function(msg, sender, sendResponse) {
         sendResponse({ success: false, error: err.message });
       }
     })();
+    return true;
+  }
+
+  if (msg.action === 'getHistory') {
+    getHistory().then(function(history) {
+      sendResponse({ success: true, data: history });
+    });
+    return true;
+  }
+
+  if (msg.action === 'clearHistory') {
+    clearHistory().then(function() {
+      sendResponse({ success: true });
+    });
     return true;
   }
 
