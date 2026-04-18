@@ -5,6 +5,11 @@ function showView(id) {
   for (var i = 0; i < views.length; i++) {
     $(views[i]).style.display = (views[i] === id) ? 'block' : 'none';
   }
+  // Hide thin warning and cache badge when switching views
+  if (id !== 'summary') {
+    $('thinWarning').style.display = 'none';
+    $('cacheBadge').style.display = 'none';
+  }
 }
 
 function escapeHtml(str) {
@@ -13,7 +18,7 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-function runSummarize() {
+function runSummarize(skipCache) {
   showView('loading');
   chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
     if (!tabs || !tabs[0]) {
@@ -21,7 +26,7 @@ function runSummarize() {
       return;
     }
     chrome.runtime.sendMessage(
-      { action: 'summarize', tabId: tabs[0].id },
+      { action: 'summarize', tabId: tabs[0].id, skipCache: skipCache || false },
       function(response) {
         if (chrome.runtime.lastError) {
           showError(chrome.runtime.lastError.message);
@@ -44,10 +49,27 @@ function runSummarize() {
 function renderSummary(data) {
   var summary = data.summary;
 
+  // Content type badge
   var badge = $('typeBadge');
   badge.textContent = summary.content_type;
   badge.className = 'badge badge-' + summary.content_type;
   badge.style.display = 'inline';
+
+  // Cache badge
+  var cacheBadge = $('cacheBadge');
+  if (data.fromCache) {
+    cacheBadge.style.display = 'inline';
+  } else {
+    cacheBadge.style.display = 'none';
+  }
+
+  // Thin content warning
+  var thinWarning = $('thinWarning');
+  if (data.thin) {
+    thinWarning.style.display = 'block';
+  } else {
+    thinWarning.style.display = 'none';
+  }
 
   $('pageTitle').textContent = data.title || data.url;
 
@@ -118,25 +140,27 @@ function copyAll() {
   });
 }
 
+// Event listeners
 $('saveKeyBtn').addEventListener('click', function() {
   var key = $('apiKeyInput').value.trim();
   if (!key) return;
   chrome.runtime.sendMessage({ action: 'setApiKey', key: key }, function() {
-    runSummarize();
+    runSummarize(false);
   });
 });
 
 $('copyBtn').addEventListener('click', copyAll);
-$('resummarizeBtn').addEventListener('click', runSummarize);
-$('retryBtn').addEventListener('click', runSummarize);
+$('resummarizeBtn').addEventListener('click', function() { runSummarize(true); });
+$('retryBtn').addEventListener('click', function() { runSummarize(false); });
 
+// Init
 chrome.runtime.sendMessage({ action: 'checkApiKey' }, function(response) {
   if (chrome.runtime.lastError || !response) {
     showView('setup');
     return;
   }
   if (response.hasKey) {
-    runSummarize();
+    runSummarize(false);
   } else {
     showView('setup');
   }

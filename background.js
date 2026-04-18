@@ -3,51 +3,72 @@ chrome.action.onClicked.addListener(function(tab) {
   chrome.sidePanel.open({ tabId: tab.id });
 });
 
-const API_URL = 'https://api.anthropic.com/v1/messages';
-const MODEL = 'claude-haiku-4-5-20251001';
+var API_URL = 'https://api.anthropic.com/v1/messages';
+var MODEL = 'claude-haiku-4-5-20251001';
 
-const SYSTEM_PROMPT = `You are a universal webpage summarizer. Given the text content of a webpage, produce a structured summary in exactly 5 sections totaling 300-400 words.
-
-First, classify the content as one of: news, product, research, blog, documentation, general.
-
-Then use the matching section template:
-news: What Happened | Key Facts | Analysis | Impact | Background
-product: What It Is | Features | Pricing & Model | Pros & Cons | Verdict
-research: Abstract | Methods | Findings | Implications | Limitations
-blog: Thesis | Arguments | Evidence | Counterpoints | Conclusion
-documentation: Overview | Core Concepts | Key APIs/Features | Usage Notes | Gotchas
-general: TL;DR | Key Points | Details | Takeaways | Context
-
-Rules:
-- Be factual and neutral
-- Preserve numbers, dates, names exactly
-- No filler phrases
-- Never hallucinate
-- 300-400 words total
-
-Respond in this exact JSON format:
-{"content_type":"...","sections":[{"header":"...","body":"..."},{"header":"...","body":"..."},{"header":"...","body":"..."},{"header":"...","body":"..."},{"header":"...","body":"..."}]}
-
-Return ONLY valid JSON. No markdown fences, no preamble.`;
+var SYSTEM_PROMPT = 'You are a universal webpage summarizer. Given the text content of a webpage, produce a structured summary in exactly 5 sections totaling 300-400 words.\n\nFirst, classify the content as one of: news, product, research, blog, documentation, general.\n\nThen use the matching section template:\nnews: What Happened | Key Facts | Analysis | Impact | Background\nproduct: What It Is | Features | Pricing & Model | Pros & Cons | Verdict\nresearch: Abstract | Methods | Findings | Implications | Limitations\nblog: Thesis | Arguments | Evidence | Counterpoints | Conclusion\ndocumentation: Overview | Core Concepts | Key APIs/Features | Usage Notes | Gotchas\ngeneral: TL;DR | Key Points | Details | Takeaways | Context\n\nRules:\n- Be factual and neutral\n- Preserve numbers, dates, names exactly\n- No filler phrases\n- Never hallucinate\n- 300-400 words total\n\nRespond in this exact JSON format:\n{"content_type":"...","sections":[{"header":"...","body":"..."},{"header":"...","body":"..."},{"header":"...","body":"..."},{"header":"...","body":"..."},{"header":"...","body":"..."}]}\n\nReturn ONLY valid JSON. No markdown fences, no preamble.';
 
 async function getApiKey() {
-  const result = await chrome.storage.local.get('apiKey');
+  var result = await chrome.storage.local.get('apiKey');
   return result.apiKey || null;
 }
 
+// --- Cache functions ---
+function getCacheKey(url) {
+  return 'cache_' + url.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 180);
+}
+
+async function getCached(url) {
+  var key = getCacheKey(url);
+  var result = await chrome.storage.local.get(key);
+  if (result[key]) {
+    var cached = result[key];
+    // Cache expires after 24 hours
+    if (Date.now() - cached.timestamp < 24 * 60 * 60 * 1000) {
+      return cached;
+    }
+    // Expired — remove it
+    await chrome.storage.local.remove(key);
+  }
+  return null;
+}
+
+async function setCache(url, data) {
+  var key = getCacheKey(url);
+  var entry = {};
+  entry[key] = {
+    url: data.url,
+    title: data.title,
+    summary: data.summary,
+    thin: data.thin || false,
+    timestamp: Date.now()
+  };
+  await chrome.storage.local.set(entry);
+}
+
+async function clearCache(url) {
+  var key = getCacheKey(url);
+  await chrome.storage.local.remove(key);
+}
+
+// --- Content extraction ---
 async function extractFromTab(tabId) {
-  const results = await chrome.scripting.executeScript({
-    target: { tabId },
-    func: () => {
-      const noise = ['nav','header','footer','aside','script','style','noscript','iframe','.ad','.ads','.sidebar','.menu','.cookie-banner'];
-      const clone = document.body.cloneNode(true);
-      noise.forEach(s => { clone.querySelectorAll(s).forEach(el => el.remove()); });
-      let content = '';
-      for (const s of ['main','article','[role="main"]','.content','.post','.entry']) {
-        const el = clone.querySelector(s);
+  var results = await chrome.scripting.executeScript({
+    target: { tabId: tabId },
+    func: function() {
+      var noise = ['nav','header','footer','aside','script','style','noscript','iframe','.ad','.ads','.sidebar','.menu','.cookie-banner'];
+      var clone = document.body.cloneNode(true);
+      for (var i = 0; i < noise.length; i++) {
+        var els = clone.querySelectorAll(noise[i]);
+        for (var j = 0; j < els.length; j++) { els[j].remove(); }
+      }
+      var content = '';
+      var selectors = ['main','article','[role="main"]','.content','.post','.entry'];
+      for (var k = 0; k < selectors.length; k++) {
+        var el = clone.querySelector(selectors[k]);
         if (el && el.textContent.trim().length > 200) { content = el.textContent.trim(); break; }
       }
-      if (!content || content.length < 200) content = clone.textContent.trim();
+      if (!content || content.length < 200) { content = clone.textContent.trim(); }
       content = content.replace(/\s+/g, ' ');
       return { title: document.title, content: content, url: location.href };
     }
@@ -55,17 +76,26 @@ async function extractFromTab(tabId) {
   return results[0].result;
 }
 
+// --- Smart truncation ---
+function truncateContent(content) {
+  var words = content.split(/\s+/);
+  if (words.length <= 6000) return content;
+  // Keep first 60% and last 20% to preserve intro and conclusion
+  var headCount = Math.floor(6000 * 0.6);
+  var tailCount = Math.floor(6000 * 0.2);
+  var head = words.slice(0, headCount).join(' ');
+  var tail = words.slice(-tailCount).join(' ');
+  return head + '\n\n[... content truncated for length ...]\n\n' + tail;
+}
+
+// --- Summarize via API ---
 async function summarize(url, title, content) {
-  const apiKey = await getApiKey();
+  var apiKey = await getApiKey();
   if (!apiKey) throw new Error('NO_API_KEY');
 
-  const words = content.split(/\s+/);
-  let truncated = content;
-  if (words.length > 6000) {
-    truncated = words.slice(0, 4500).join(' ') + '\n\n[...truncated...]\n\n' + words.slice(-1500).join(' ');
-  }
+  var truncated = truncateContent(content);
 
-  const response = await fetch(API_URL, {
+  var response = await fetch(API_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -83,40 +113,86 @@ async function summarize(url, title, content) {
 
   if (!response.ok) throw new Error('API_ERROR: ' + response.status);
 
-  const data = await response.json();
-  const text = data.content[0].text;
+  var data = await response.json();
+  var text = data.content[0].text;
   try { return JSON.parse(text); }
   catch (e) {
-    const match = text.match(/\{[\s\S]*\}/);
+    var match = text.match(/\{[\s\S]*\}/);
     if (match) return JSON.parse(match[0]);
     throw new Error('PARSE_ERROR');
   }
 }
 
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+// --- Main handler ---
+async function handleSummarize(tabId, skipCache) {
+  var extraction = await extractFromTab(tabId);
+  if (!extraction || extraction.content.trim().length < 50) {
+    throw new Error('NO_CONTENT: Not enough readable content on this page.');
+  }
+
+  var wordCount = extraction.content.trim().split(/\s+/).length;
+  var thin = wordCount < 200;
+
+  // Check cache unless skipCache is true
+  if (!skipCache) {
+    var cached = await getCached(extraction.url);
+    if (cached) {
+      return {
+        url: cached.url,
+        title: cached.title,
+        summary: cached.summary,
+        thin: cached.thin,
+        fromCache: true
+      };
+    }
+  } else {
+    // Clear existing cache for this URL
+    await clearCache(extraction.url);
+  }
+
+  var summary = await summarize(extraction.url, extraction.title, extraction.content);
+
+  var result = {
+    url: extraction.url,
+    title: extraction.title,
+    summary: summary,
+    thin: thin,
+    fromCache: false
+  };
+
+  // Save to cache
+  await setCache(extraction.url, result);
+
+  return result;
+}
+
+// --- Message listener ---
+chrome.runtime.onMessage.addListener(function(msg, sender, sendResponse) {
   if (msg.action === 'summarize') {
-    (async () => {
+    (async function() {
       try {
-        const extraction = await extractFromTab(msg.tabId);
-        if (!extraction || extraction.content.trim().length < 50) {
-          sendResponse({ success: false, error: 'NO_CONTENT' });
-          return;
-        }
-        const summary = await summarize(extraction.url, extraction.title, extraction.content);
-        sendResponse({ success: true, data: { url: extraction.url, title: extraction.title, summary } });
+        var result = await handleSummarize(msg.tabId, msg.skipCache || false);
+        sendResponse({ success: true, data: result });
       } catch (err) {
         sendResponse({ success: false, error: err.message });
       }
     })();
     return true;
   }
+
   if (msg.action === 'setApiKey') {
-    chrome.storage.local.set({ apiKey: msg.key }).then(() => sendResponse({ success: true }));
+    chrome.storage.local.set({ apiKey: msg.key }).then(function() {
+      sendResponse({ success: true });
+    });
     return true;
   }
+
   if (msg.action === 'checkApiKey') {
-    getApiKey().then(key => sendResponse({ hasKey: !!key }));
+    getApiKey().then(function(key) {
+      sendResponse({ hasKey: !!key });
+    });
     return true;
   }
+
   return true;
 });
